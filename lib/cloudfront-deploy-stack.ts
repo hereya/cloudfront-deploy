@@ -18,10 +18,6 @@ export class CloudfrontDeployStack extends cdk.Stack {
             description: 'Root directory of the project to deploy',
         });
 
-        new CfnOutput(this, 'hereyaProjectEnv', {
-            value: hereyaProjectEnv.valueAsString,
-            description: 'Environment variables for the project to deploy',
-        });
 
         new CfnOutput(this, 'hereyaProjectRootDir', {
             value: hereyaProjectRootDir.valueAsString,
