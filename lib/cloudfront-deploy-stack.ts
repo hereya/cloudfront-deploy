@@ -1,5 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
-import { CfnParameter } from 'aws-cdk-lib';
+import { CfnOutput, CfnParameter } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -18,7 +18,14 @@ export class CloudfrontDeployStack extends cdk.Stack {
             description: 'Root directory of the project to deploy',
         });
 
-        console.log(hereyaProjectEnv.valueAsString);
-        console.log(hereyaProjectRootDir.valueAsString);
+        new CfnOutput(this, 'hereyaProjectEnv', {
+            value: hereyaProjectEnv.valueAsString,
+            description: 'Environment variables for the project to deploy',
+        });
+
+        new CfnOutput(this, 'hereyaProjectRootDir', {
+            value: hereyaProjectRootDir.valueAsString,
+            description: 'Root directory of the project to deploy',
+        });
     }
 }
