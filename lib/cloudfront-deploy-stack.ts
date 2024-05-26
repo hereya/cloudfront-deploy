@@ -1,32 +1,50 @@
 import * as cdk from 'aws-cdk-lib';
-import { CfnOutput, CfnParameter } from 'aws-cdk-lib';
+import { CfnOutput } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
+import { Bucket, BucketAccessControl } from 'aws-cdk-lib/aws-s3';
+import * as path from 'node:path';
+import { Distribution, OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
+import { S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 
 export class CloudfrontDeployStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
 
-        const hereyaProjectEnv = new CfnParameter(this, 'hereyaProjectEnv', {
-            type: 'String',
-            description: 'Environment variables for the project to deploy',
-        });
+        const bucket = new Bucket(this, 'Bucket', {
+            accessControl: BucketAccessControl.PRIVATE,
+            autoDeleteObjects: true,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        })
 
-        const hereyaProjectRootDir = new CfnParameter(this, 'hereyaProjectRootDir', {
-            type: 'String',
-            description: 'Root directory of the project to deploy',
-        });
+        const hereyaProjectRootDir: string = this.node.tryGetContext('hereyaProjectRootDir');
+        const distFolder: string = this.node.tryGetContext('distFolder') ?? 'dist';
+        if(!hereyaProjectRootDir) {
+            throw new Error('hereyaProjectRootDir context variable is required');
+        }
 
-        new CfnOutput(this, 'hereyaProjectEnvOutput', {
-            value: hereyaProjectEnv.valueAsString,
-            description: 'Environment variables for the project to deploy',
-        });
+        new BucketDeployment(this, 'BucketDeployment', {
+            destinationBucket: bucket,
+            sources: [Source.asset(path.resolve(hereyaProjectRootDir, distFolder))]
+        })
 
+        const originAccessIdentity = new OriginAccessIdentity(this, 'OriginAccessIdentity');
+        bucket.grantRead(originAccessIdentity);
 
-        new CfnOutput(this, 'hereyaProjectRootDirOutput', {
-            value: hereyaProjectRootDir.valueAsString,
-            description: 'Root directory of the project to deploy',
-        });
+        const distribution = new Distribution(this, 'Distribution', {
+            defaultRootObject: 'index.html',
+            defaultBehavior: {
+                origin: new S3Origin(bucket, {originAccessIdentity}),
+            },
+        })
+
+        new CfnOutput(this, 'BucketName', {
+            value: bucket.bucketName,
+        })
+
+        new CfnOutput(this, 'DistributionDomainName', {
+            value: distribution.distributionDomainName,
+        })
+
     }
 }
