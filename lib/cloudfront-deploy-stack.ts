@@ -27,9 +27,9 @@ export class CloudfrontDeployStack extends cdk.Stack {
         }
 
         const customDomain = this.node.tryGetContext('customDomain');
-        const domainZone = this.node.tryGetContext('domainZone');
+        let domainZone = this.node.tryGetContext('domainZone');
         if(customDomain && !domainZone) {
-            throw new Error('domainZone context variable is required when using customDomain');
+            domainZone = customDomain.split('.').slice(1).join('.');
         }
 
         let certificate: ICertificate | undefined;
