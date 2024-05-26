@@ -4,7 +4,7 @@ import { Construct } from 'constructs';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { Bucket, BucketAccessControl } from 'aws-cdk-lib/aws-s3';
 import * as path from 'node:path';
-import { Distribution, OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
+import { Distribution, OriginAccessIdentity, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { CertificateValidation, DnsValidatedCertificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { ARecord, HostedZone, IHostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
@@ -60,9 +60,11 @@ export class CloudfrontDeployStack extends cdk.Stack {
             defaultRootObject: 'index.html',
             defaultBehavior: {
                 origin: new S3Origin(bucket, {originAccessIdentity}),
+                viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
             },
             domainNames: customDomain ? [customDomain] : undefined,
             certificate: certificate,
+
         })
 
         if( customDomain && hostedZone ) {
