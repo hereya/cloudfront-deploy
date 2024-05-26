@@ -69,6 +69,7 @@ export class CloudfrontDeployStack extends cdk.Stack {
             new ARecord(this, 'AliasRecord', {
                 zone: hostedZone,
                 target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
+                recordName: customDomain,
             })
         }
 
