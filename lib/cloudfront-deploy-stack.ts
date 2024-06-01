@@ -4,6 +4,7 @@ import { Construct } from 'constructs';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { Bucket, BucketAccessControl } from 'aws-cdk-lib/aws-s3';
 import * as path from 'node:path';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import { Distribution, OriginAccessIdentity, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { CertificateValidation, DnsValidatedCertificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
@@ -22,19 +23,19 @@ export class CloudfrontDeployStack extends cdk.Stack {
 
         const distFolder: string = this.node.tryGetContext('distFolder') ?? 'dist';
         const hereyaProjectRootDir: string = this.node.tryGetContext('hereyaProjectRootDir');
-        if(!hereyaProjectRootDir) {
+        if (!hereyaProjectRootDir) {
             throw new Error('hereyaProjectRootDir context variable is required');
         }
 
         const customDomain = this.node.tryGetContext('customDomain');
         let domainZone = this.node.tryGetContext('domainZone');
-        if(customDomain && !domainZone) {
+        if (customDomain && !domainZone) {
             domainZone = customDomain.split('.').slice(1).join('.');
         }
 
         let certificate: ICertificate | undefined;
         let hostedZone: IHostedZone | undefined;
-        if(customDomain) {
+        if (customDomain) {
             hostedZone = HostedZone.fromLookup(this, 'HostedZone', {
                 domainName: domainZone,
             })
@@ -56,18 +57,50 @@ export class CloudfrontDeployStack extends cdk.Stack {
         const originAccessIdentity = new OriginAccessIdentity(this, 'OriginAccessIdentity');
         bucket.grantRead(originAccessIdentity);
 
+        const urlRewriteFunction = new cloudfront.Function(this, 'UrlRewriteFunction', {
+            code: cloudfront.FunctionCode.fromInline(`
+async function handler(event) {
+    const request = event.request;
+    const uri = request.uri;
+    
+    // Check whether the URI is missing a file name.
+    if (uri.endsWith('/')) {
+        request.uri += 'index.html';
+    } 
+    // Check whether the URI is missing a file extension.
+    else if (!uri.includes('.')) {
+        request.uri += '/index.html';
+    }
+
+    return request;
+}
+            `)
+        })
+
         const distribution = new Distribution(this, 'Distribution', {
             defaultRootObject: 'index.html',
             defaultBehavior: {
-                origin: new S3Origin(bucket, {originAccessIdentity}),
+                origin: new S3Origin(bucket, { originAccessIdentity }),
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            },
+            additionalBehaviors: {
+                '/*': {
+                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    functionAssociations: [
+                        {
+                            function: urlRewriteFunction,
+                            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+                        }
+                    ]
+                }
             },
             domainNames: customDomain ? [customDomain] : undefined,
             certificate: certificate,
 
         })
 
-        if( customDomain && hostedZone ) {
+        if (customDomain && hostedZone) {
             new ARecord(this, 'AliasRecord', {
                 zone: hostedZone,
                 target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
@@ -80,7 +113,7 @@ export class CloudfrontDeployStack extends cdk.Stack {
             value: bucket.bucketName,
         })
 
-        if(customDomain) {
+        if (customDomain) {
             new CfnOutput(this, 'DomainName', {
                 value: customDomain,
             })
