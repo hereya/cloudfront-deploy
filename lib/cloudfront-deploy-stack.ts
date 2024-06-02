@@ -59,14 +59,14 @@ export class CloudfrontDeployStack extends cdk.Stack {
 
         const urlRewriteFunction = new cloudfront.Function(this, 'UrlRewriteFunction', {
             code: cloudfront.FunctionCode.fromInline(`
-async function handler(event) {
-    const request = event.request;
-    const uri = request.uri;
-    
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+
     // Check whether the URI is missing a file name.
     if (uri.endsWith('/')) {
         request.uri += 'index.html';
-    } 
+    }
     // Check whether the URI is missing a file extension.
     else if (!uri.includes('.')) {
         request.uri += '/index.html';
