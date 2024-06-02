@@ -49,11 +49,6 @@ export class CloudfrontDeployStack extends cdk.Stack {
         }
 
 
-        new BucketDeployment(this, 'BucketDeployment', {
-            destinationBucket: bucket,
-            sources: [Source.asset(path.resolve(hereyaProjectRootDir, distFolder))]
-        })
-
         const originAccessIdentity = new OriginAccessIdentity(this, 'OriginAccessIdentity');
         bucket.grantRead(originAccessIdentity);
 
@@ -99,6 +94,13 @@ async function handler(event) {
             domainNames: customDomain ? [customDomain] : undefined,
             certificate: certificate,
 
+        })
+
+        new BucketDeployment(this, 'BucketDeployment', {
+            destinationBucket: bucket,
+            sources: [Source.asset(path.resolve(hereyaProjectRootDir, distFolder))],
+            distribution,
+            distributionPaths: ['/*'],
         })
 
         if (customDomain && hostedZone) {
