@@ -21,14 +21,14 @@ export class CloudfrontDeployStack extends cdk.Stack {
             removalPolicy: cdk.RemovalPolicy.DESTROY,
         })
 
-        const distFolder: string = this.node.tryGetContext('distFolder') ?? 'dist';
-        const hereyaProjectRootDir: string = this.node.tryGetContext('hereyaProjectRootDir');
+        const distFolder: string = process.env['distFolder'] ?? 'dist';
+        const hereyaProjectRootDir: string = process.env['hereyaProjectRootDir'] as string;
         if (!hereyaProjectRootDir) {
             throw new Error('hereyaProjectRootDir context variable is required');
         }
 
-        const customDomain = this.node.tryGetContext('customDomain');
-        let domainZone = this.node.tryGetContext('domainZone');
+        const customDomain = process.env['customDomain'];
+        let domainZone = process.env['domainZone'] as string;
         if (customDomain && !domainZone) {
             domainZone = customDomain.split('.').slice(1).join('.');
         }
