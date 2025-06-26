@@ -27,6 +27,9 @@ export class CloudfrontDeployStack extends cdk.Stack {
             throw new Error('hereyaProjectRootDir context variable is required');
         }
 
+        // Check if this is an SPA or traditional website
+        const isSpa = process.env['isSpa'] === 'true';
+
         const customDomain = process.env['customDomain'];
         let domainZone = process.env['domainZone'] as string;
         if (customDomain && !domainZone) {
@@ -59,22 +62,39 @@ async function handler(event) {
     const request = event.request;
     const uri = request.uri;
     
-    // Handle root path
-    if (uri === '/') {
-        request.uri = '/index.html';
-        return request;
-    }
+    // Only apply SPA routing if this is configured as an SPA
+    const isSpa = ${isSpa};
     
-    // Check if the URI ends with a slash (directory)
-    if (uri.endsWith('/')) {
-        request.uri = uri + 'index.html';
-        return request;
-    }
-    
-    // Check if the URI doesn't have a file extension (likely a route)
-    if (!uri.includes('.')) {
-        request.uri = '/index.html';
-        return request;
+    if (isSpa) {
+        // Handle root path
+        if (uri === '/') {
+            request.uri = '/index.html';
+            return request;
+        }
+        
+        // Check if the URI ends with a slash (directory)
+        if (uri.endsWith('/')) {
+            request.uri = uri + 'index.html';
+            return request;
+        }
+        
+        // Check if the URI doesn't have a file extension (likely a route)
+        if (!uri.includes('.')) {
+            request.uri = '/index.html';
+            return request;
+        }
+    } else {
+        // For non-SPA: only handle root path and trailing slashes
+        if (uri === '/') {
+            request.uri = '/index.html';
+            return request;
+        }
+        
+        // Remove trailing slash for non-SPA (optional)
+        if (uri.endsWith('/') && uri !== '/') {
+            request.uri = uri.slice(0, -1);
+            return request;
+        }
     }
     
     // For files with extensions, serve as-is
@@ -104,8 +124,10 @@ async function handler(event) {
                             eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
                         }
                     ],
-                    // Don't cache HTML files too aggressively for SPA updates
-                    cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+                    // Cache policy depends on whether it's SPA or not
+                    cachePolicy: isSpa 
+                        ? cloudfront.CachePolicy.CACHING_DISABLED  // Don't cache HTML for SPA updates
+                        : cloudfront.CachePolicy.CACHING_OPTIMIZED, // Cache everything for traditional sites
                     compress: true,
                 },
                 // Cache static assets (JS, CSS, images) aggressively
@@ -185,7 +207,7 @@ async function handler(event) {
             domainNames: customDomain ? [customDomain] : undefined,
             certificate: certificate,
             // Add error pages for SPA - redirect 404s to index.html
-            errorResponses: [
+            errorResponses: isSpa ? [
                 {
                     httpStatus: 404,
                     responseHttpStatus: 200,
@@ -198,7 +220,7 @@ async function handler(event) {
                     responsePagePath: '/index.html',
                     ttl: cdk.Duration.seconds(0),
                 },
-            ],
+            ] : undefined,
         })
 
         new BucketDeployment(this, 'BucketDeployment', {
