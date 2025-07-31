@@ -5,8 +5,8 @@ import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { Bucket, BucketAccessControl } from 'aws-cdk-lib/aws-s3';
 import * as path from 'node:path';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
-import { Distribution, OriginAccessIdentity, ViewerProtocolPolicy, ErrorResponse } from 'aws-cdk-lib/aws-cloudfront';
-import { S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
+import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { CertificateValidation, DnsValidatedCertificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { ARecord, HostedZone, IHostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
@@ -51,8 +51,7 @@ export class CloudfrontDeployStack extends cdk.Stack {
             })
         }
 
-        const originAccessIdentity = new OriginAccessIdentity(this, 'OriginAccessIdentity');
-        bucket.grantRead(originAccessIdentity);
+        // Using Origin Access Control (OAC) instead of OAI - handled automatically by S3BucketOrigin.withOriginAccessControl()
 
         // Enhanced URL rewrite function for better SPA support
         const urlRewriteFunction = new cloudfront.Function(this, 'UrlRewriteFunction', {
@@ -106,7 +105,7 @@ async function handler(event) {
         const distribution = new Distribution(this, 'Distribution', {
             defaultRootObject: 'index.html',
             defaultBehavior: {
-                origin: new S3Origin(bucket, { originAccessIdentity }),
+                origin: S3BucketOrigin.withOriginAccessControl(bucket),
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 // Cache static assets aggressively
                 cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
@@ -116,7 +115,7 @@ async function handler(event) {
             additionalBehaviors: {
                 // Handle all routes for SPA
                 '/*': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     functionAssociations: [
                         {
@@ -132,73 +131,73 @@ async function handler(event) {
                 },
                 // Cache static assets (JS, CSS, images) aggressively
                 '*.js': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.css': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.png': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.jpg': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.jpeg': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.gif': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.svg': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.ico': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.woff': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.woff2': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.ttf': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
                 },
                 '*.eot': {
-                    origin: new S3Origin(bucket, { originAccessIdentity }),
+                    origin: S3BucketOrigin.withOriginAccessControl(bucket),
                     viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
                     compress: true,
