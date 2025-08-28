@@ -83,15 +83,22 @@ async function handler(event) {
             return request;
         }
     } else {
-        // For non-SPA: only handle root path and trailing slashes
+        // For non-SPA: handle root path, directories, and index files
         if (uri === '/') {
             request.uri = '/index.html';
             return request;
         }
         
-        // Remove trailing slash for non-SPA (optional)
-        if (uri.endsWith('/') && uri !== '/') {
-            request.uri = uri.slice(0, -1);
+        // Handle trailing slashes - append index.html
+        if (uri.endsWith('/')) {
+            request.uri = uri + 'index.html';
+            return request;
+        }
+        
+        // If URI doesn't have a file extension, treat it as a directory
+        // and append /index.html
+        if (!uri.includes('.')) {
+            request.uri = uri + '/index.html';
             return request;
         }
     }
