@@ -31,9 +31,17 @@ export class CloudfrontDeployStack extends cdk.Stack {
         const isSpa = process.env['isSpa'] === 'true';
 
         const customDomain = process.env['customDomain'];
+        
+        // Domain detection and setup for apex domains
+        const isApexDomain = customDomain && !customDomain.includes('www.') && customDomain.split('.').length === 2;
+        const apexDomain = isApexDomain ? customDomain : null;
+        const wwwDomain = isApexDomain ? `www.${customDomain}` : customDomain;
+        const canonicalDomain = wwwDomain; // WWW is always canonical when apex is provided
+        
         let domainZone = process.env['domainZone'] as string;
         if (customDomain && !domainZone) {
-            domainZone = customDomain.split('.').slice(1).join('.');
+            // For apex domains, use the apex as the zone
+            domainZone = isApexDomain ? customDomain : customDomain.split('.').slice(1).join('.');
         }
 
         let certificate: ICertificate | undefined;
@@ -43,23 +51,51 @@ export class CloudfrontDeployStack extends cdk.Stack {
                 domainName: domainZone,
             })
 
-            certificate = new DnsValidatedCertificate(this, 'Certificate', {
-                domainName: customDomain,
-                hostedZone,
-                region: 'us-east-1',
-                validation: CertificateValidation.fromDns(hostedZone),
-            })
+            if (isApexDomain) {
+                // Certificate with www as primary and apex as SAN
+                certificate = new DnsValidatedCertificate(this, 'Certificate', {
+                    domainName: wwwDomain!,  // Primary: www
+                    subjectAlternativeNames: [apexDomain!],  // SAN: apex
+                    hostedZone,
+                    region: 'us-east-1',
+                    validation: CertificateValidation.fromDns(hostedZone),
+                })
+            } else {
+                // Existing behavior for non-apex domains
+                certificate = new DnsValidatedCertificate(this, 'Certificate', {
+                    domainName: customDomain,
+                    hostedZone,
+                    region: 'us-east-1',
+                    validation: CertificateValidation.fromDns(hostedZone),
+                })
+            }
         }
 
         // Using Origin Access Control (OAC) instead of OAI - handled automatically by S3BucketOrigin.withOriginAccessControl()
 
-        // Enhanced URL rewrite function for better SPA support
+        // Combined function handling both apex redirect and URL rewriting
         const urlRewriteFunction = new cloudfront.Function(this, 'UrlRewriteFunction', {
             runtime: cloudfront.FunctionRuntime.JS_2_0,
             code: cloudfront.FunctionCode.fromInline(`
 async function handler(event) {
     const request = event.request;
     const uri = request.uri;
+    const host = request.headers.host ? request.headers.host.value : '';
+    
+    // Handle apex to www redirect if this is an apex domain
+    const isApexDomain = ${isApexDomain ? 'true' : 'false'};
+    const apexDomain = ${apexDomain ? `'${apexDomain}'` : 'null'};
+    const wwwDomain = ${wwwDomain ? `'${wwwDomain}'` : 'null'};
+    
+    if (isApexDomain && host === apexDomain) {
+        return {
+            statusCode: 301,
+            statusDescription: 'Moved Permanently',
+            headers: {
+                location: { value: 'https://' + wwwDomain + uri }
+            }
+        };
+    }
     
     // Only apply SPA routing if this is configured as an SPA
     const isSpa = ${isSpa};
@@ -210,7 +246,7 @@ async function handler(event) {
                     compress: true,
                 },
             },
-            domainNames: customDomain ? [customDomain] : undefined,
+            domainNames: isApexDomain ? [wwwDomain!, apexDomain!] : (customDomain ? [customDomain] : undefined),
             certificate: certificate,
             // Add error pages for SPA - redirect 404s to index.html
             errorResponses: isSpa ? [
@@ -237,11 +273,28 @@ async function handler(event) {
         })
 
         if (customDomain && hostedZone) {
-            new ARecord(this, 'AliasRecord', {
-                zone: hostedZone,
-                target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
-                recordName: customDomain,
-            })
+            if (isApexDomain) {
+                // A record for apex domain (will redirect to www)
+                new ARecord(this, 'ApexAliasRecord', {
+                    zone: hostedZone,
+                    target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
+                    recordName: apexDomain!,
+                });
+                
+                // A record for www subdomain (primary)
+                new ARecord(this, 'WwwAliasRecord', {
+                    zone: hostedZone,
+                    target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
+                    recordName: wwwDomain!,
+                });
+            } else {
+                // Existing behavior for non-apex domains
+                new ARecord(this, 'AliasRecord', {
+                    zone: hostedZone,
+                    target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
+                    recordName: customDomain,
+                });
+            }
         }
 
         new CfnOutput(this, 'BucketName', {
@@ -249,9 +302,21 @@ async function handler(event) {
         })
 
         if (customDomain) {
-            new CfnOutput(this, 'DomainName', {
-                value: customDomain,
-            })
+            if (isApexDomain) {
+                new CfnOutput(this, 'PrimaryDomain', {
+                    value: canonicalDomain!,
+                    description: 'Primary domain (canonical URL)',
+                });
+                
+                new CfnOutput(this, 'ApexDomain', {
+                    value: apexDomain!,
+                    description: 'Apex domain (redirects to www)',
+                });
+            } else {
+                new CfnOutput(this, 'DomainName', {
+                    value: customDomain,
+                });
+            }
         } else {
             new CfnOutput(this, 'DistributionDomainName', {
                 value: distribution.distributionDomainName,
