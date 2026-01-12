@@ -30,6 +30,9 @@ export class CloudfrontDeployStack extends cdk.Stack {
         // Check if this is an SPA or traditional website
         const isSpa = process.env['isSpa'] === 'true';
 
+        // Optional Basic Auth protection
+        const basicAuthPassword = process.env['basicAuthPassword'];
+
         const customDomain = process.env['customDomain'];
         
         // Domain detection and setup for apex domains
@@ -73,7 +76,7 @@ export class CloudfrontDeployStack extends cdk.Stack {
 
         // Using Origin Access Control (OAC) instead of OAI - handled automatically by S3BucketOrigin.withOriginAccessControl()
 
-        // Combined function handling both apex redirect and URL rewriting
+        // Combined function handling auth, apex redirect and URL rewriting
         const urlRewriteFunction = new cloudfront.Function(this, 'UrlRewriteFunction', {
             runtime: cloudfront.FunctionRuntime.JS_2_0,
             code: cloudfront.FunctionCode.fromInline(`
@@ -81,12 +84,83 @@ async function handler(event) {
     const request = event.request;
     const uri = request.uri;
     const host = request.headers.host ? request.headers.host.value : '';
-    
+
+    // Basic Auth protection (if enabled)
+    const basicAuthEnabled = ${basicAuthPassword ? 'true' : 'false'};
+    const expectedPassword = ${basicAuthPassword ? JSON.stringify(basicAuthPassword) : 'null'};
+
+    if (basicAuthEnabled) {
+        const authHeader = request.headers.authorization;
+
+        if (!authHeader || !authHeader.value) {
+            return {
+                statusCode: 401,
+                statusDescription: 'Unauthorized',
+                headers: {
+                    'www-authenticate': { value: 'Basic realm="Protected Site"' },
+                    'content-type': { value: 'text/plain' }
+                },
+                body: { encoding: 'text', data: 'Unauthorized' }
+            };
+        }
+
+        const authValue = authHeader.value;
+        if (!authValue.startsWith('Basic ')) {
+            return {
+                statusCode: 401,
+                statusDescription: 'Unauthorized',
+                headers: {
+                    'www-authenticate': { value: 'Basic realm="Protected Site"' },
+                    'content-type': { value: 'text/plain' }
+                },
+                body: { encoding: 'text', data: 'Invalid authentication method' }
+            };
+        }
+
+        try {
+            const decoded = atob(authValue.substring(6));
+            const colonIndex = decoded.indexOf(':');
+            if (colonIndex === -1) {
+                return {
+                    statusCode: 401,
+                    statusDescription: 'Unauthorized',
+                    headers: {
+                        'www-authenticate': { value: 'Basic realm="Protected Site"' },
+                        'content-type': { value: 'text/plain' }
+                    },
+                    body: { encoding: 'text', data: 'Invalid credentials format' }
+                };
+            }
+            const providedPassword = decoded.substring(colonIndex + 1);
+            if (providedPassword !== expectedPassword) {
+                return {
+                    statusCode: 401,
+                    statusDescription: 'Unauthorized',
+                    headers: {
+                        'www-authenticate': { value: 'Basic realm="Protected Site"' },
+                        'content-type': { value: 'text/plain' }
+                    },
+                    body: { encoding: 'text', data: 'Invalid credentials' }
+                };
+            }
+        } catch (e) {
+            return {
+                statusCode: 401,
+                statusDescription: 'Unauthorized',
+                headers: {
+                    'www-authenticate': { value: 'Basic realm="Protected Site"' },
+                    'content-type': { value: 'text/plain' }
+                },
+                body: { encoding: 'text', data: 'Invalid credentials format' }
+            };
+        }
+    }
+
     // Handle apex to www redirect if this is an apex domain
     const isApexDomain = ${isApexDomain ? 'true' : 'false'};
     const apexDomain = ${apexDomain ? `'${apexDomain}'` : 'null'};
     const wwwDomain = ${wwwDomain ? `'${wwwDomain}'` : 'null'};
-    
+
     if (isApexDomain && host === apexDomain) {
         return {
             statusCode: 301,
@@ -96,23 +170,23 @@ async function handler(event) {
             }
         };
     }
-    
+
     // Only apply SPA routing if this is configured as an SPA
     const isSpa = ${isSpa};
-    
+
     if (isSpa) {
         // Handle root path
         if (uri === '/') {
             request.uri = '/index.html';
             return request;
         }
-        
+
         // Check if the URI ends with a slash (directory)
         if (uri.endsWith('/')) {
             request.uri = uri + 'index.html';
             return request;
         }
-        
+
         // Check if the URI doesn't have a file extension (likely a route)
         if (!uri.includes('.')) {
             request.uri = '/index.html';
@@ -124,13 +198,13 @@ async function handler(event) {
             request.uri = '/index.html';
             return request;
         }
-        
+
         // Handle trailing slashes - append index.html
         if (uri.endsWith('/')) {
             request.uri = uri + 'index.html';
             return request;
         }
-        
+
         // If URI doesn't have a file extension, treat it as a directory
         // and append /index.html
         if (!uri.includes('.')) {
@@ -138,7 +212,7 @@ async function handler(event) {
             return request;
         }
     }
-    
+
     // For files with extensions, serve as-is
     return request;
 }

@@ -52,6 +52,7 @@ The stack uses these environment variables:
 - `isSpa` - 'true' for SPA routing, 'false' for traditional website
 - `customDomain` - Optional custom domain name
 - `domainZone` - DNS zone for custom domain
+- `basicAuthPassword` - Optional password for HTTP Basic Auth protection (omit to disable)
 
 ## Architecture
 
@@ -60,7 +61,7 @@ The main stack (`lib/cloudfront-deploy-stack.ts`) creates:
 
 1. **S3 Bucket** - Private bucket for static files
 2. **CloudFront Distribution** - CDN with intelligent routing
-3. **CloudFront Function** - URL rewriting logic that adapts based on `isSpa` setting
+3. **CloudFront Function** - URL rewriting logic, optional Basic Auth, and apex domain redirects
 4. **Origin Access Identity** - Secure S3 access
 5. **Certificate Manager** (optional) - SSL for custom domains
 6. **Route53 Records** (optional) - DNS for custom domains
@@ -90,6 +91,7 @@ When modifying the stack:
 4. Cross-region references are supported for certificates
 5. Files are deployed from `distFolder` to the S3 bucket root
 6. Cache invalidation runs automatically after file upload
+7. Basic Auth protection activates when `basicAuthPassword` is set (username-agnostic, only password is validated)
 
 ## Development Tips
 
