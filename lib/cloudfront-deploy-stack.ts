@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { CertificateValidation, DnsValidatedCertificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { Certificate, CertificateValidation, DnsValidatedCertificate, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { ARecord, HostedZone, IHostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 
@@ -33,44 +33,95 @@ export class CloudfrontDeployStack extends cdk.Stack {
         // Optional Basic Auth protection
         const basicAuthPassword = process.env['basicAuthPassword'];
 
-        const customDomain = process.env['customDomain'];
-        
-        // Domain detection and setup for apex domains
-        const isApexDomain = customDomain && !customDomain.includes('www.') && customDomain.split('.').length === 2;
+        // `customDomain` accepts several domains, comma-separated: ONE
+        // distribution then serves every brand, instead of one distribution per
+        // brand all shipping the same bundle. The first domain is the primary.
+        const domains = parseDomains(process.env['customDomain']);
+        const customDomain: string | undefined = domains[0];
+        const extraDomains = domains.slice(1);
+
+        // An already-issued certificate (us-east-1) to use INSTEAD of
+        // provisioning one. Required as soon as a domain is not in a Route 53
+        // zone of this account: a certificate can only be DNS-validated
+        // automatically inside a zone we control, and CloudFront accepts
+        // exactly ONE certificate per distribution - so a customer-owned domain
+        // means a single certificate covering every domain, issued out of band
+        // and validated in part by its owner.
+        const customDomainCertificateArn = process.env['customDomainCertificateArn'];
+
+        // Apex handling (www as canonical + apex redirect) is a single-domain
+        // feature; it stays exactly as it was and does not apply to a list.
+        const isApexDomain = domains.length === 1 && !!customDomain
+            && !customDomain.includes('www.') && customDomain.split('.').length === 2;
         const apexDomain = isApexDomain ? customDomain : null;
         const wwwDomain = isApexDomain ? `www.${customDomain}` : customDomain;
         const canonicalDomain = wwwDomain; // WWW is always canonical when apex is provided
-        
+
         let domainZone = process.env['domainZone'] as string;
-        if (customDomain && !domainZone) {
+        if (customDomain && !domainZone && !customDomainCertificateArn) {
             // For apex domains, use the apex as the zone
             domainZone = isApexDomain ? customDomain : customDomain.split('.').slice(1).join('.');
         }
 
+        // Every domain the distribution answers on.
+        const distributionDomains = isApexDomain
+            ? [wwwDomain!, apexDomain!]
+            : domains;
+        // A domain gets a record here only if it belongs to the zone we look
+        // up. A customer-owned domain is served all the same - its DNS simply
+        // lives with its owner, who aliases it to the distribution.
+        const inOurZone = (domain: string) => !!domainZone
+            && (domain === domainZone || domain.endsWith(`.${domainZone}`));
+
         let certificate: ICertificate | undefined;
         let hostedZone: IHostedZone | undefined;
         if (customDomain) {
-            hostedZone = HostedZone.fromLookup(this, 'HostedZone', {
-                domainName: domainZone,
-            })
+            if (domainZone) {
+                hostedZone = HostedZone.fromLookup(this, 'HostedZone', {
+                    domainName: domainZone,
+                })
+            }
 
-            if (isApexDomain) {
-                // Certificate with www as primary and apex as SAN
-                certificate = new DnsValidatedCertificate(this, 'Certificate', {
-                    domainName: wwwDomain!,  // Primary: www
-                    subjectAlternativeNames: [apexDomain!],  // SAN: apex
-                    hostedZone,
-                    region: 'us-east-1',
-                    validation: CertificateValidation.fromDns(hostedZone),
-                })
+            if (customDomainCertificateArn) {
+                // CloudFront only accepts certificates from us-east-1. Caught
+                // here because the CloudFormation error for this is opaque.
+                const certRegion = customDomainCertificateArn.split(':')[3];
+                if (certRegion && certRegion !== 'us-east-1') {
+                    throw new Error(
+                        `customDomainCertificateArn must be a us-east-1 certificate for CloudFront, got ${certRegion}`
+                    );
+                }
+                certificate = Certificate.fromCertificateArn(this, 'Certificate', customDomainCertificateArn);
             } else {
-                // Existing behavior for non-apex domains
-                certificate = new DnsValidatedCertificate(this, 'Certificate', {
-                    domainName: customDomain,
-                    hostedZone,
-                    region: 'us-east-1',
-                    validation: CertificateValidation.fromDns(hostedZone),
-                })
+                const outOfZone = distributionDomains.filter(d => !inOurZone(d));
+                if (outOfZone.length > 0) {
+                    // Issuing here would park the validation records in OUR
+                    // zone, where they validate nothing: the certificate would
+                    // never issue and the deploy would hang, then fail.
+                    throw new Error(
+                        `${outOfZone.join(', ')} is outside the zone ${domainZone}: supply customDomainCertificateArn (a certificate covering every domain, validated by their owners)`
+                    );
+                }
+                if (isApexDomain) {
+                    // Certificate with www as primary and apex as SAN
+                    certificate = new DnsValidatedCertificate(this, 'Certificate', {
+                        domainName: wwwDomain!,  // Primary: www
+                        subjectAlternativeNames: [apexDomain!],  // SAN: apex
+                        hostedZone: hostedZone!,
+                        region: 'us-east-1',
+                        validation: CertificateValidation.fromDns(hostedZone),
+                    })
+                } else {
+                    // Existing behavior for non-apex domains, extended to the
+                    // additional domains as SANs on the same certificate.
+                    certificate = new DnsValidatedCertificate(this, 'Certificate', {
+                        domainName: customDomain,
+                        subjectAlternativeNames: extraDomains.length > 0 ? extraDomains : undefined,
+                        hostedZone: hostedZone!,
+                        region: 'us-east-1',
+                        validation: CertificateValidation.fromDns(hostedZone),
+                    })
+                }
             }
         }
 
@@ -320,7 +371,7 @@ async function handler(event) {
                     compress: true,
                 },
             },
-            domainNames: isApexDomain ? [wwwDomain!, apexDomain!] : (customDomain ? [customDomain] : undefined),
+            domainNames: customDomain ? distributionDomains : undefined,
             certificate: certificate,
             // Add error pages for SPA - redirect 404s to index.html
             errorResponses: isSpa ? [
@@ -362,11 +413,19 @@ async function handler(event) {
                     recordName: wwwDomain!,
                 });
             } else {
-                // Existing behavior for non-apex domains
-                new ARecord(this, 'AliasRecord', {
-                    zone: hostedZone,
-                    target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
-                    recordName: customDomain,
+                // Existing behavior for non-apex domains. The primary keeps the
+                // historical construct id so an existing stack is untouched;
+                // additional domains are numbered from their own index, and a
+                // domain outside our zone gets no record at all.
+                domains.forEach((domain, index) => {
+                    if (!inOurZone(domain)) {
+                        return;
+                    }
+                    new ARecord(this, index === 0 ? 'AliasRecord' : `AliasRecord${index}`, {
+                        zone: hostedZone!,
+                        target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
+                        recordName: domain,
+                    });
                 });
             }
         }
@@ -397,4 +456,9 @@ async function handler(event) {
             })
         }
     }
+}
+
+function parseDomains(input: string | undefined): string[] {
+    if (!input) return [];
+    return input.split(',').map(d => d.trim()).filter(d => d.length > 0);
 }
